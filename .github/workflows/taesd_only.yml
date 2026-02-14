@@ -1,0 +1,38 @@
+name: Quantize TAESD Only
+on: [workflow_dispatch]
+
+jobs:
+  build-and-quantize-vae:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout stable-diffusion.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: master
+          submodules: recursive
+
+      - name: Install Build Dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+      - name: Build C++ Project
+        run: |
+          mkdir build && cd build
+          cmake .. -DSD_BUILD_EXAMPLES=ON
+          cmake --build . --config Release -j $(nproc)
+
+      - name: Download Original TAESD
+        run: |
+          # Pulling the official PyTorch safetensors from the creator
+          curl -f -L -o taesd.safetensors "https://huggingface.co/madebyollin/taesd/resolve/main/diffusion_pytorch_model.safetensors?download=true"
+
+      - name: Quantize TAESD
+        run: |
+          # Quantizing to q8_0 for the best balance of speed and quality
+          ./build/bin/sd-cli -M convert --type q8_0 -m taesd.safetensors -o taesd.gguf
+
+      - name: Upload TAESD Asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: taesd-model
+          path: taesd.gguf
