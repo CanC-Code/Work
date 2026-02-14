@@ -25,19 +25,39 @@ jobs:
 
       - name: Download Original Motion Module
         run: |
-          curl -L -H "User-Agent: Mozilla/5.0" -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt?download=true"
+          # Use -f to fail on HTTP errors and -L to follow redirects
+          # We use the 'resolve' link which is the most reliable for raw data
+          curl -f -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt"
 
       - name: Convert CKPT to Safetensors
         run: |
           python3 -c "
           import torch
+          import os
           from safetensors.torch import save_file
-          # Added weights_only=False to fix the UnpicklingError
-          weights = torch.load('mm_sd_v15_v2.ckpt', map_location='cpu', weights_only=False)
+          
+          file_path = 'mm_sd_v15_v2.ckpt'
+          
+          # Check if the file is actually a small text file/error page
+          if os.path.getsize(file_path) < 1000000:
+              with open(file_path, 'r') as f:
+                  print(f'ERROR: File is too small. Content start: {f.read(100)}')
+              exit(1)
+
+          print(f'Loading {file_path}...')
+          weights = torch.load(file_path, map_location='cpu', weights_only=False)
+          
+          # Extract state dict if nested
           state_dict = weights.get('state_dict', weights)
-          # Ensure all tensors are contiguous for safetensors saving
-          state_dict = {k: v.contiguous() for k, v in state_dict.items()}
-          save_file(state_dict, 'mm_sd_v15_v2.safetensors')
+          
+          # Prepare for safetensors
+          new_state_dict = {}
+          for k, v in state_dict.items():
+              if isinstance(v, torch.Tensor):
+                  new_state_dict[k] = v.contiguous()
+          
+          print('Saving to safetensors...')
+          save_file(new_state_dict, 'mm_sd_v15_v2.safetensors')
           "
 
       - name: Quantize Motion Module
