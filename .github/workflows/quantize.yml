@@ -1,15 +1,16 @@
-name: Quantize Motion Module
-on: [workflow_dispatch] # Allows you to start it manually with a button
+name: Quantize Assets for Termux
+on: [workflow_dispatch]
 
 jobs:
-  build-and-quantize:
+  build-and-prep:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout stable-diffusion.cpp
+      - name: Checkout with Submodules
         uses: actions/checkout@v4
         with:
           repository: leejet/stable-diffusion.cpp
           ref: master
+          submodules: 'recursive'
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential
@@ -20,16 +21,21 @@ jobs:
           cmake ..
           cmake --build . --config Release -j $(nproc)
 
-      - name: Download Original Motion Module (1.8GB)
+      - name: Download Files
         run: |
+          # Download Motion Module (1.8GB)
           curl -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt?download=true"
+          # Download Tiny VAE (10MB)
+          curl -L -o taesd.gguf "https://huggingface.co/leejet/stable-diffusion.cpp/resolve/main/models/taesd.gguf?download=true"
 
-      - name: Quantize to Q4_K
+      - name: Quantize Motion Module
         run: |
           ./build/bin/sd-cli -M convert -m mm_sd_v15_v2.ckpt -o mm_sd_v15_v2_Q4_K.gguf --type q4_k
 
-      - name: Upload Result
+      - name: Upload Termux Assets
         uses: actions/upload-artifact@v4
         with:
-          name: quantized-motion-module
-          path: mm_sd_v15_v2_Q4_K.gguf
+          name: sd-mobile-assets
+          path: |
+            mm_sd_v15_v2_Q4_K.gguf
+            taesd.gguf
