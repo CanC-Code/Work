@@ -25,9 +25,8 @@ jobs:
 
       - name: Download Original Motion Module
         run: |
-          # Use -f to fail on HTTP errors and -L to follow redirects
-          # We use the 'resolve' link which is the most reliable for raw data
-          curl -f -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt"
+          # Using the verified link you provided
+          curl -f -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff/resolve/c323709054f248d80af65b1644d139575d43940b/mm_sd_v15_v2.ckpt?download=true"
 
       - name: Convert CKPT to Safetensors
         run: |
@@ -38,23 +37,17 @@ jobs:
           
           file_path = 'mm_sd_v15_v2.ckpt'
           
-          # Check if the file is actually a small text file/error page
-          if os.path.getsize(file_path) < 1000000:
-              with open(file_path, 'r') as f:
-                  print(f'ERROR: File is too small. Content start: {f.read(100)}')
+          # Sanity check: 1.8GB is approx 1,800,000,000 bytes
+          if os.path.getsize(file_path) < 100000000:
+              print(f'ERROR: File size is only {os.path.getsize(file_path)} bytes. Download failed.')
               exit(1)
 
           print(f'Loading {file_path}...')
           weights = torch.load(file_path, map_location='cpu', weights_only=False)
-          
-          # Extract state dict if nested
           state_dict = weights.get('state_dict', weights)
           
-          # Prepare for safetensors
-          new_state_dict = {}
-          for k, v in state_dict.items():
-              if isinstance(v, torch.Tensor):
-                  new_state_dict[k] = v.contiguous()
+          # Clean up the state dict for Safetensors
+          new_state_dict = {k: v.contiguous() for k, v in state_dict.items() if isinstance(v, torch.Tensor)}
           
           print('Saving to safetensors...')
           save_file(new_state_dict, 'mm_sd_v15_v2.safetensors')
@@ -62,6 +55,7 @@ jobs:
 
       - name: Quantize Motion Module
         run: |
+          # Convert the 1.8GB safetensors to a 162MB GGUF
           ./build/bin/sd-cli -M convert --type q4_0 -m mm_sd_v15_v2.safetensors -o mm_sd_v15_v2_Q4_0.gguf
 
       - name: Upload Result
