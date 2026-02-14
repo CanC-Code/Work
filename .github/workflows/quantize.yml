@@ -1,16 +1,16 @@
-name: Quantize Motion Module
+name: Quantize Assets
 on: [workflow_dispatch]
 
 jobs:
   build-and-quantize:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout stable-diffusion.cpp (with Submodules)
+      - name: Checkout stable-diffusion.cpp
         uses: actions/checkout@v4
         with:
           repository: leejet/stable-diffusion.cpp
           ref: master
-          submodules: recursive  # <--- THIS IS THE FIX
+          submodules: recursive
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential
@@ -18,20 +18,29 @@ jobs:
       - name: Build Project
         run: |
           mkdir build && cd build
-          cmake ..
+          cmake .. -DSD_BUILD_EXAMPLES=ON
           cmake --build . --config Release -j $(nproc)
 
-      - name: Download Original Motion Module (1.8GB)
+      - name: Download Original Assets
         run: |
-          # Adding -H to mimic a browser, preventing 15-byte pointer downloads
+          # Download Motion Module (1.8GB)
           curl -L -H "User-Agent: Mozilla/5.0" -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt?download=true"
+          # Download TAESD (Tiny VAE)
+          curl -L -H "User-Agent: Mozilla/5.0" -o taesd.safetensors "https://huggingface.co/madebyollin/taesd/resolve/main/diffusion_pytorch_model.safetensors?download=true"
 
-      - name: Quantize to Q4_K
+      - name: Quantize Motion Module
         run: |
-          ./build/bin/sd-cli -M convert -m mm_sd_v15_v2.ckpt -o mm_sd_v15_v2_Q4_K.gguf --type q4_k
+          # Moving --type before the output path to satisfy the new parser
+          ./build/bin/sd-cli -M convert --type q4_k -m mm_sd_v15_v2.ckpt -o mm_sd_v15_v2_Q4_K.gguf
 
-      - name: Upload Result
+      - name: Quantize TAESD
+        run: |
+          ./build/bin/sd-cli -M convert --type q8_0 -m taesd.safetensors -o taesd.gguf
+
+      - name: Upload Quantized Assets
         uses: actions/upload-artifact@v4
         with:
-          name: quantized-motion-module
-          path: mm_sd_v15_v2_Q4_K.gguf
+          name: mobile-optimized-models
+          path: |
+            mm_sd_v15_v2_Q4_K.gguf
+            taesd.gguf
