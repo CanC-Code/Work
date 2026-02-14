@@ -1,16 +1,16 @@
-name: Quantize Assets for Termux
+name: Quantize Motion Module
 on: [workflow_dispatch]
 
 jobs:
-  build-and-prep:
+  build-and-quantize:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout with Submodules
+      - name: Checkout stable-diffusion.cpp (with Submodules)
         uses: actions/checkout@v4
         with:
           repository: leejet/stable-diffusion.cpp
           ref: master
-          submodules: 'recursive'
+          submodules: recursive  # <--- THIS IS THE FIX
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential
@@ -21,21 +21,17 @@ jobs:
           cmake ..
           cmake --build . --config Release -j $(nproc)
 
-      - name: Download Files
+      - name: Download Original Motion Module (1.8GB)
         run: |
-          # Download Motion Module (1.8GB)
-          curl -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt?download=true"
-          # Download Tiny VAE (10MB)
-          curl -L -o taesd.gguf "https://huggingface.co/leejet/stable-diffusion.cpp/resolve/main/models/taesd.gguf?download=true"
+          # Adding -H to mimic a browser, preventing 15-byte pointer downloads
+          curl -L -H "User-Agent: Mozilla/5.0" -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt?download=true"
 
-      - name: Quantize Motion Module
+      - name: Quantize to Q4_K
         run: |
           ./build/bin/sd-cli -M convert -m mm_sd_v15_v2.ckpt -o mm_sd_v15_v2_Q4_K.gguf --type q4_k
 
-      - name: Upload Termux Assets
+      - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: sd-mobile-assets
-          path: |
-            mm_sd_v15_v2_Q4_K.gguf
-            taesd.gguf
+          name: quantized-motion-module
+          path: mm_sd_v15_v2_Q4_K.gguf
