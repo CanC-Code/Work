@@ -30,8 +30,8 @@ jobs:
 
       - name: Quantize Motion Module
         run: |
-          # Moving --type before the output path to satisfy the new parser
-          ./build/bin/sd-cli -M convert --type q4_k -m mm_sd_v15_v2.ckpt -o mm_sd_v15_v2_Q4_K.gguf
+          # Using q4_0 instead of q4_k to resolve the "invalid weight format" error
+          ./build/bin/sd-cli -M convert --type q4_0 -m mm_sd_v15_v2.ckpt -o mm_sd_v15_v2_Q4_0.gguf
 
       - name: Quantize TAESD
         run: |
@@ -42,5 +42,5 @@ jobs:
         with:
           name: mobile-optimized-models
           path: |
-            mm_sd_v15_v2_Q4_K.gguf
+            mm_sd_v15_v2_Q4_0.gguf
             taesd.gguf
