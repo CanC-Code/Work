@@ -1,0 +1,35 @@
+name: Quantize Motion Module
+on: [workflow_dispatch] # Allows you to start it manually with a button
+
+jobs:
+  build-and-quantize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout stable-diffusion.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: master
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+      - name: Build Project
+        run: |
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --config Release -j $(nproc)
+
+      - name: Download Original Motion Module (1.8GB)
+        run: |
+          curl -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt?download=true"
+
+      - name: Quantize to Q4_K
+        run: |
+          ./build/bin/sd-cli -M convert -m mm_sd_v15_v2.ckpt -o mm_sd_v15_v2_Q4_K.gguf --type q4_k
+
+      - name: Upload Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: quantized-motion-module
+          path: mm_sd_v15_v2_Q4_K.gguf
