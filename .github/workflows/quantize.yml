@@ -1,4 +1,4 @@
-name: Quantize Assets
+name: Quantize Motion Module
 on: [workflow_dispatch]
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
       - name: Install Build and Python Deps
         run: |
           sudo apt-get update && sudo apt-get install -y cmake build-essential python3-pip
-          pip3 install torch safetensors  # Needed for the format conversion
+          pip3 install torch safetensors numpy
 
       - name: Build C++ Project
         run: |
@@ -23,35 +23,29 @@ jobs:
           cmake .. -DSD_BUILD_EXAMPLES=ON
           cmake --build . --config Release -j $(nproc)
 
-      - name: Download Original Assets
+      - name: Download Original Motion Module
         run: |
           curl -L -H "User-Agent: Mozilla/5.0" -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt?download=true"
-          curl -L -H "User-Agent: Mozilla/5.0" -o taesd.safetensors "https://huggingface.co/madebyollin/taesd/resolve/main/diffusion_pytorch_model.safetensors?download=true"
 
-      - name: Convert CKPT to Safetensors (Python Script)
+      - name: Convert CKPT to Safetensors
         run: |
           python3 -c "
           import torch
           from safetensors.torch import save_file
-          weights = torch.load('mm_sd_v15_v2.ckpt', map_location='cpu')
-          # If the ckpt is nested (common in AnimateDiff), extract the state dict
+          # Added weights_only=False to fix the UnpicklingError
+          weights = torch.load('mm_sd_v15_v2.ckpt', map_location='cpu', weights_only=False)
           state_dict = weights.get('state_dict', weights)
+          # Ensure all tensors are contiguous for safetensors saving
+          state_dict = {k: v.contiguous() for k, v in state_dict.items()}
           save_file(state_dict, 'mm_sd_v15_v2.safetensors')
           "
 
       - name: Quantize Motion Module
         run: |
-          # Now that it is a .safetensors file, sd-cli will accept it
           ./build/bin/sd-cli -M convert --type q4_0 -m mm_sd_v15_v2.safetensors -o mm_sd_v15_v2_Q4_0.gguf
 
-      - name: Quantize TAESD
-        run: |
-          ./build/bin/sd-cli -M convert --type q8_0 -m taesd.safetensors -o taesd.gguf
-
-      - name: Upload Quantized Assets
+      - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: mobile-optimized-models
-          path: |
-            mm_sd_v15_v2_Q4_0.gguf
-            taesd.gguf
+          name: quantized-motion-module
+          path: mm_sd_v15_v2_Q4_0.gguf
