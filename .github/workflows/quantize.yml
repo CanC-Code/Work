@@ -12,10 +12,12 @@ jobs:
           ref: master
           submodules: recursive
 
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+      - name: Install Build and Python Deps
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake build-essential python3-pip
+          pip3 install torch safetensors  # Needed for the format conversion
 
-      - name: Build Project
+      - name: Build C++ Project
         run: |
           mkdir build && cd build
           cmake .. -DSD_BUILD_EXAMPLES=ON
@@ -23,15 +25,24 @@ jobs:
 
       - name: Download Original Assets
         run: |
-          # Download Motion Module (1.8GB)
           curl -L -H "User-Agent: Mozilla/5.0" -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5/resolve/main/mm_sd_v15_v2.ckpt?download=true"
-          # Download TAESD (Tiny VAE)
           curl -L -H "User-Agent: Mozilla/5.0" -o taesd.safetensors "https://huggingface.co/madebyollin/taesd/resolve/main/diffusion_pytorch_model.safetensors?download=true"
+
+      - name: Convert CKPT to Safetensors (Python Script)
+        run: |
+          python3 -c "
+          import torch
+          from safetensors.torch import save_file
+          weights = torch.load('mm_sd_v15_v2.ckpt', map_location='cpu')
+          # If the ckpt is nested (common in AnimateDiff), extract the state dict
+          state_dict = weights.get('state_dict', weights)
+          save_file(state_dict, 'mm_sd_v15_v2.safetensors')
+          "
 
       - name: Quantize Motion Module
         run: |
-          # Using q4_0 instead of q4_k to resolve the "invalid weight format" error
-          ./build/bin/sd-cli -M convert --type q4_0 -m mm_sd_v15_v2.ckpt -o mm_sd_v15_v2_Q4_0.gguf
+          # Now that it is a .safetensors file, sd-cli will accept it
+          ./build/bin/sd-cli -M convert --type q4_0 -m mm_sd_v15_v2.safetensors -o mm_sd_v15_v2_Q4_0.gguf
 
       - name: Quantize TAESD
         run: |
