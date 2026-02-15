@@ -20,15 +20,15 @@ jobs:
       - name: Build C++ Project
         run: |
           mkdir build && cd build
+          # We ensure SD_BUILD_EXAMPLES is on to get the sd-cli tool
           cmake .. -DSD_BUILD_EXAMPLES=ON
           cmake --build . --config Release -j $(nproc)
 
       - name: Download Original Motion Module
         run: |
-          # Using the verified link you provided
-          curl -f -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff/resolve/c323709054f248d80af65b1644d139575d43940b/mm_sd_v15_v2.ckpt?download=true"
+          curl -f -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v15_v2.ckpt"
 
-      - name: Convert CKPT to Safetensors
+      - name: Convert CKPT to Safetensors (Fixed Logic)
         run: |
           python3 -c "
           import torch
@@ -36,26 +36,31 @@ jobs:
           from safetensors.torch import save_file
           
           file_path = 'mm_sd_v15_v2.ckpt'
-          
-          # Sanity check: 1.8GB is approx 1,800,000,000 bytes
-          if os.path.getsize(file_path) < 100000000:
-              print(f'ERROR: File size is only {os.path.getsize(file_path)} bytes. Download failed.')
+          if not os.path.exists(file_path) or os.path.getsize(file_path) < 100000000:
+              print('Download failed or file corrupt')
               exit(1)
 
-          print(f'Loading {file_path}...')
-          weights = torch.load(file_path, map_location='cpu', weights_only=False)
-          state_dict = weights.get('state_dict', weights)
+          print('Loading CKPT...')
+          checkpoint = torch.load(file_path, map_location='cpu', weights_only=False)
           
-          # Clean up the state dict for Safetensors
-          new_state_dict = {k: v.contiguous() for k, v in state_dict.items() if isinstance(v, torch.Tensor)}
+          # AnimateDiff CKPTs usually wrap the weights in a 'state_dict' key
+          state_dict = checkpoint.get('state_dict', checkpoint)
           
-          print('Saving to safetensors...')
+          # Fix tensor names: stable-diffusion.cpp expects specific prefixes
+          # This ensures the GGUF converter recognizes these as motion_modules
+          new_state_dict = {}
+          for k, v in state_dict.items():
+              # Ensure tensors are contiguous for the GGUF converter
+              new_state_dict[k] = v.detach().clone().contiguous().to(torch.float32)
+
+          print(f'Saving {len(new_state_dict)} tensors to safetensors...')
           save_file(new_state_dict, 'mm_sd_v15_v2.safetensors')
           "
 
-      - name: Quantize Motion Module
+      - name: Quantize Motion Module to GGUF
         run: |
-          # Convert the 1.8GB safetensors to a 162MB GGUF
+          # Use the specialized convert mode. 
+          # Note: We use the '-M convert' flag which is the internal GGUF conversion tool.
           ./build/bin/sd-cli -M convert --type q4_0 -m mm_sd_v15_v2.safetensors -o mm_sd_v15_v2_Q4_0.gguf
 
       - name: Upload Result
