@@ -20,7 +20,6 @@ jobs:
       - name: Build C++ Project
         run: |
           mkdir build && cd build
-          # We ensure SD_BUILD_EXAMPLES is on to get the sd-cli tool
           cmake .. -DSD_BUILD_EXAMPLES=ON
           cmake --build . --config Release -j $(nproc)
 
@@ -28,40 +27,39 @@ jobs:
         run: |
           curl -f -L -o mm_sd_v15_v2.ckpt "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v15_v2.ckpt"
 
-      - name: Convert CKPT to Safetensors (Fixed Logic)
+      - name: Convert and Rename Tensors
         run: |
           python3 -c "
           import torch
-          import os
           from safetensors.torch import save_file
           
-          file_path = 'mm_sd_v15_v2.ckpt'
-          if not os.path.exists(file_path) or os.path.getsize(file_path) < 100000000:
-              print('Download failed or file corrupt')
-              exit(1)
-
-          print('Loading CKPT...')
-          checkpoint = torch.load(file_path, map_location='cpu', weights_only=False)
+          # Load the CKPT
+          ckpt = torch.load('mm_sd_v15_v2.ckpt', map_location='cpu', weights_only=False)
+          state_dict = ckpt.get('state_dict', ckpt)
           
-          # AnimateDiff CKPTs usually wrap the weights in a 'state_dict' key
-          state_dict = checkpoint.get('state_dict', checkpoint)
-          
-          # Fix tensor names: stable-diffusion.cpp expects specific prefixes
-          # This ensures the GGUF converter recognizes these as motion_modules
           new_state_dict = {}
           for k, v in state_dict.items():
-              # Ensure tensors are contiguous for the GGUF converter
-              new_state_dict[k] = v.detach().clone().contiguous().to(torch.float32)
+              # CRITICAL: Rename keys to match stable-diffusion.cpp internal convention
+              # We prefix motion module keys so the loader finds them
+              name = k
+              if not name.startswith('model.diffusion_model.'):
+                  name = 'model.diffusion_model.' + name
+              
+              # Ensure tensors are float32 and contiguous for quantization
+              new_state_dict[name] = v.to(torch.float32).contiguous()
 
-          print(f'Saving {len(new_state_dict)} tensors to safetensors...')
-          save_file(new_state_dict, 'mm_sd_v15_v2.safetensors')
+          print(f'Saving {len(new_state_dict)} renamed tensors...')
+          save_file(new_state_dict, 'mm_sd_v15_v2_fixed.safetensors')
           "
 
-      - name: Quantize Motion Module to GGUF
+      - name: Quantize to GGUF
         run: |
-          # Use the specialized convert mode. 
-          # Note: We use the '-M convert' flag which is the internal GGUF conversion tool.
-          ./build/bin/sd-cli -M convert --type q4_0 -m mm_sd_v15_v2.safetensors -o mm_sd_v15_v2_Q4_0.gguf
+          # Use --convert-name to help the engine map keys correctly
+          ./build/bin/sd-cli -M convert \
+            --type q4_0 \
+            --convert-name \
+            -m mm_sd_v15_v2_fixed.safetensors \
+            -o mm_sd_v15_v2_Q4_0.gguf
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
