@@ -1,8 +1,8 @@
-name: Quantize TAESD Only
+name: Build and Quantize TAESD GGUF
 on: [workflow_dispatch]
 
 jobs:
-  build-and-quantize-vae:
+  build-and-quantize:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout stable-diffusion.cpp
@@ -13,26 +13,29 @@ jobs:
           submodules: recursive
 
       - name: Install Build Dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential curl
 
-      - name: Build C++ Project
+      - name: Build sd-cli
         run: |
           mkdir build && cd build
           cmake .. -DSD_BUILD_EXAMPLES=ON
           cmake --build . --config Release -j $(nproc)
 
-      - name: Download Original TAESD
+      - name: Download Official TAESD (Decoder Only)
         run: |
-          # Pulling the official PyTorch safetensors from the creator
-          curl -f -L -o taesd.safetensors "https://huggingface.co/madebyollin/taesd/resolve/main/diffusion_pytorch_model.safetensors?download=true"
+          # We download the specific decoder for SD 1.5
+          curl -L -o taesd_decoder.safetensors "https://huggingface.co/madebyollin/taesd/resolve/main/taesd_decoder.safetensors?download=true"
 
-      - name: Quantize TAESD
+      - name: Convert and Quantize to GGUF
         run: |
-          # Quantizing to q8_0 for the best balance of speed and quality
-          ./build/bin/sd-cli -M convert --type q8_0 -m taesd.safetensors -o taesd.gguf
+          # The -v flag ensures we treat it as a VAE/TAESD type
+          # We use q8_0 because it's only 10MB and prevents artifacts on your Moto G Play
+          ./build/bin/sd-cli -M convert -m taesd_decoder.safetensors -o taesd_v15_q8_0.gguf --type q8_0
 
-      - name: Upload TAESD Asset
+      - name: Upload TAESD GGUF
         uses: actions/upload-artifact@v4
         with:
-          name: taesd-model
-          path: taesd.gguf
+          name: taesd-gguf-output
+          path: taesd_v15_q8_0.gguf
